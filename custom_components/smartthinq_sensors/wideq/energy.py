@@ -55,14 +55,15 @@ ENERGY_EXTRA_PARAMS: dict[str, dict[str, str]] = {
 
 # ThinQ1 devices of the air family (AC, dehumidifier: model JSON 401) use
 # POST {thinq1Uri}/aircon/inquiryPowerData with
-#   {"deviceId": id, "period": "Hour_YYYY.MM.DDT000000Z/YYYY.MM.DDT000000Z"}
+#   {"deviceId": id, "period": "Hour_YYYYMMDDT000000Z/YYYYMMDDT000000Z"}
 # and answer with powerData "HH_MM_Wh/HH_MM_Wh/..." (ioBroker.lg-thinq).
+# A wrong period format is answered with 9004 "DB processing failed".
 ENERGY_V1_DEVICE_TYPES = [DeviceType.AC, DeviceType.DEHUMIDIFIER]
 ENERGY_V1_PATH = "aircon/inquiryPowerData"
 ENERGY_V1_KEY_DATA = "powerData"
 ENERGY_V1_KEY_RESULT = "returnCd"
 ENERGY_V1_EMPTY_RESULT = "0010"
-_V1_DATE_FMT = "%Y.%m.%d"
+_V1_DATE_FMT = "%Y%m%d"
 
 ENERGY_POLL_INTERVAL = 300  # seconds
 ENERGY_HISTORY_DAYS = 2  # yesterday + today
@@ -296,6 +297,7 @@ class EnergyMeter:
     async def _fetch_v1(self, start: date, end: date) -> dict[str, float] | None:
         """Fetch hourly buckets for each day in [start, end] from the V1 API."""
         buckets: dict[str, float] = {}
+        failed = 0
         day = start
         while day <= end:
             period = (
@@ -319,7 +321,9 @@ class EnergyMeter:
                         exc,
                     )
                     self._last_error = str(exc)
-                    return None
+                    failed += 1
+                    day += timedelta(days=1)
+                    continue
             parsed = parse_energy_history_v1(result, day)
             if parsed is None:
                 _LOGGER.debug(
@@ -328,9 +332,14 @@ class EnergyMeter:
                     result,
                 )
                 self._last_error = "no valid energy history result"
-                return None
+                failed += 1
+                day += timedelta(days=1)
+                continue
             buckets.update(parsed)
             day += timedelta(days=1)
+        if failed and failed > (end - start).days:
+            # every requested day failed
+            return None
         if self._service_path != ENERGY_V1_PATH:
             _LOGGER.info(
                 "Energy history for %s (%s) available via ThinQ1 '%s'",

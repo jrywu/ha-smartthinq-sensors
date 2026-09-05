@@ -1,4 +1,4 @@
-import asyncio, sys, types
+import asyncio, sys, types, re
 from datetime import datetime
 import os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "custom_components", "smartthinq_sensors"))
 from wideq.energy import EnergyMeter, parse_energy_history, ENERGY_MAX_PROBE_FAILURES
@@ -130,7 +130,9 @@ class FakeV1Session:
         self.calls = []
     async def post(self, path, data):
         self.calls.append((path, data))
-        if data["period"].startswith("Hour_2026.09.04"):
+        if not re.match(r"Hour_\d{8}T000000Z/\d{8}T000000Z$", data["period"]):
+            raise exc.APIError("DB 처리 실패", "9004")
+        if data["period"] < "Hour_" + __import__("datetime").date.today().strftime("%Y%m%d"):
             raise exc.APIError("no data", "0010")
         return {"returnCd": "0000", "powerData": "07_00_28/08_00_96/09_00_74"}
 
@@ -149,3 +151,26 @@ def test_v1_poll():
     assert m.energy_kwh == 0.0  # baseline
     assert asyncio.run(m.async_update(force=True)) is True
     assert m.energy_kwh == 0.0
+
+
+class FailFirstDaySession(FakeV1Session):
+    async def post(self, path, data):
+        self.calls.append((path, data))
+        if len(self.calls) == 1:
+            raise exc.APIError("DB 처리 실패", "9004")
+        return {"returnCd": "0000", "powerData": "07_00_28"}
+
+def test_v1_partial_day_failure_still_succeeds():
+    sess = FailFirstDaySession()
+    m = EnergyMeter(FakeClient(sess), V1DI())
+    assert asyncio.run(m.async_update()) is True
+    assert len(m.buckets) == 1
+
+class AllFailSession(FakeV1Session):
+    async def post(self, path, data):
+        raise exc.APIError("DB 처리 실패", "9004")
+
+def test_v1_all_days_fail():
+    m = EnergyMeter(FakeClient(AllFailSession()), V1DI())
+    assert asyncio.run(m.async_update()) is False
+    assert "9004" in m.last_error
