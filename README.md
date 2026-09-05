@@ -108,6 +108,24 @@ In this example, "My [insert thing]" will just be the placeholder
 | sensor.my_dryer | My Dryer | Dryer, turns On when on, turns Off when off |
 | binary_sensor.my_dryer_dry_completed | My Dryer Dry Completed | Turns On when dryer completed wash. You can use it in automations by triggering them when it goes from Off to On. |
 | binary_sensor.my_dryer_error_state | My Dryer Error State | Off/OK means that it's fine. On/Error means there's an error. |
+| sensor.my_washer_energy_meter | My Washer Energy Meter | Cumulative energy (kWh, `total_increasing`) built from the ThinQ "Energy Monitoring" hourly history. Usable in the HA Energy Dashboard. See [Energy meter](#energy-meter). |
+
+#### Energy meter
+
+For ThinQ2 washers, dryers and dehumidifiers the integration polls the same
+`energy-history` service used by the ThinQ app "Energy Monitoring" page every
+5 minutes and turns the hourly Wh buckets into a monotonic kWh meter
+(`sensor.<device>_energy_meter`, device class `energy`, state class
+`total_increasing`). Only positive increments of each hourly bucket are added,
+the meter is never decreased, and the value plus the per-bucket bookkeeping is
+restored on restart so energy is never counted twice. The entity attributes
+expose `today_wh`, `last_delta_wh`, `last_update`, `energy_service` (the
+service path that answered) and `last_error` for diagnostics.
+
+The service path is confirmed for laundry devices (`laundry`); for
+dehumidifiers a small list of candidate paths is probed and the first one that
+answers is used. If no path answers after ~30 minutes the meter is disabled
+for that device (enable debug logging to see the responses).
 
 #### Attributes `sensor.my_washer`
 

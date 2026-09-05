@@ -22,6 +22,7 @@ from . import core_exceptions as core_exc
 from .const import BIT_OFF, BIT_ON, StateOptions
 from .core_async import ClientAsync
 from .device_info import DeviceInfo, PlatformType
+from .energy import EnergyMeter, energy_meter_supported
 from .model_info import ModelInfo
 
 LANG_PACK = "pack"
@@ -419,6 +420,11 @@ class Device:
         self._last_additional_poll: datetime | None = None
         self._available_features = {}
 
+        # energy meter based on ThinQ energy-history service (main device only)
+        self._energy_meter: EnergyMeter | None = None
+        if not sub_device and energy_meter_supported(device_info):
+            self._energy_meter = EnergyMeter(client, device_info)
+
         # attributes for properties
         self._attr_unique_id = self._device_info.device_id
         self._attr_name = self._device_info.name
@@ -465,6 +471,19 @@ class Device:
     def available_features(self) -> dict:
         """Return available features."""
         return self._available_features
+
+    @property
+    def energy_meter(self) -> EnergyMeter | None:
+        """Return the energy meter for the device, if supported."""
+        if self._energy_meter and not self._energy_meter.supported:
+            return None
+        return self._energy_meter
+
+    async def update_energy_meter(self, force: bool = False) -> bool:
+        """Poll the energy-history service (rate limited). Return True if changed."""
+        if not (meter := self.energy_meter):
+            return False
+        return await meter.async_update(force)
 
     @property
     def status(self) -> DeviceStatus | None:

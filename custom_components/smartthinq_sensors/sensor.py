@@ -10,6 +10,7 @@ from typing import Any, Callable
 import voluptuous as vol
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
@@ -21,6 +22,7 @@ from homeassistant.const import (
     PERCENTAGE,
     STATE_UNAVAILABLE,
     EntityCategory,
+    UnitOfEnergy,
     UnitOfPower,
     UnitOfTime,
 )
@@ -605,7 +607,14 @@ async def async_setup_entry(
             for lge_device in lge_devices.get(dev_type, [])
         ]
 
-        async_add_entities(lge_sensors + lge_common_sensors)
+        lge_energy_sensors = [
+            LGEEnergyMeterSensor(lge_device)
+            for dev_type in lge_devices.keys()
+            for lge_device in lge_devices.get(dev_type, [])
+            if lge_device.device.energy_meter is not None
+        ]
+
+        async_add_entities(lge_sensors + lge_common_sensors + lge_energy_sensors)
 
     _async_discover_device(lge_cfg_devices)
 
@@ -746,3 +755,92 @@ class LGESensor(CoordinatorEntity, SensorEntity):
         if self._api.type not in SET_TIME_DEVICE_TYPES:
             raise NotImplementedError()
         await self._api.device.set_time(time_wanted)
+
+
+ATTR_ENERGY_APPLIED = "applied_wh"
+ATTR_ENERGY_SERVICE = "energy_service"
+ATTR_ENERGY_TODAY = "today_wh"
+ATTR_ENERGY_LAST_DELTA = "last_delta_wh"
+ATTR_ENERGY_LAST_UPDATE = "last_update"
+ATTR_ENERGY_LAST_ERROR = "last_error"
+
+
+class LGEEnergyMeterSensor(CoordinatorEntity, RestoreSensor):
+    """
+    Energy meter for LGE devices based on the ThinQ energy-history service.
+
+    The meter is monotonic (TOTAL_INCREASING) and fed with the hourly Wh
+    buckets shown in the ThinQ app "Energy Monitoring" page. The value and
+    the per-bucket applied map are restored on restart so that a restart
+    never double counts.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Energy meter"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_suggested_display_precision = 3
+    _attr_icon = "mdi:lightning-bolt"
+
+    def __init__(self, api: LGEDevice) -> None:
+        """Initialize the energy meter sensor."""
+        super().__init__(api.coordinator)
+        self._api = api
+        self._attr_unique_id = f"{api.unique_id}-energy_meter"
+        self._attr_device_info = api.device_info
+
+    @property
+    def _meter(self):
+        return self._api.device.energy_meter
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the meter state from the last known state."""
+        await super().async_added_to_hass()
+        meter = self._meter
+        if meter is None:
+            return
+        last_state = await self.async_get_last_state()
+        last_data = await self.async_get_last_sensor_data()
+        energy_kwh = None
+        if last_data is not None and last_data.native_value is not None:
+            try:
+                energy_kwh = float(last_data.native_value)
+            except (TypeError, ValueError):
+                energy_kwh = None
+        applied = None
+        service = None
+        if last_state is not None:
+            attrs = last_state.attributes or {}
+            applied = attrs.get(ATTR_ENERGY_APPLIED)
+            service = attrs.get(ATTR_ENERGY_SERVICE)
+            if not isinstance(applied, dict):
+                applied = None
+        meter.restore(energy_kwh, applied, service)
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return self._api.available and self._meter is not None
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the meter value in kWh."""
+        if (meter := self._meter) is None:
+            return None
+        return meter.energy_kwh
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return attributes used for diagnostics and for state restore."""
+        if (meter := self._meter) is None:
+            return None
+        last_update = meter.last_update
+        return {
+            ATTR_ENERGY_SERVICE: meter.service_path,
+            ATTR_ENERGY_TODAY: meter.today_wh(),
+            ATTR_ENERGY_LAST_DELTA: meter.last_delta_wh,
+            ATTR_ENERGY_LAST_UPDATE: last_update.isoformat() if last_update else None,
+            ATTR_ENERGY_LAST_ERROR: meter.last_error,
+            ATTR_ENERGY_APPLIED: meter.applied,
+        }

@@ -1438,6 +1438,41 @@ class Session:
         """Delete permission on V1 device after a control command."""
         await self.post("rti/delControlPermission", {"deviceId": device_id})
 
+    async def get_energy_history(
+        self,
+        device_id: str,
+        service_path: str,
+        *,
+        period: str = "hour",
+        start_date: str,
+        end_date: str,
+        extra_params: dict[str, str] | None = None,
+    ) -> dict:
+        """
+        Get the energy history for a device based on api V2.
+
+        This is the endpoint used by the ThinQ app "Energy Monitoring" page:
+        GET {thinq2Uri}/service/{service_path}/{device_id}/energy-history
+            ?type=period&period={hour|week|month|year}
+            &startDate=YYYY-MM-DD&endDate=YYYY-MM-DD[&extra]
+
+        Return the `result` dict, expected to contain an `item` list with
+        entries like {"usedDate": "2024-10-11 10:00:00", "count": 1,
+        "power": 232, "periodicEnergyData": 383} (energy in Wh).
+        """
+        params = {
+            "type": "period",
+            "period": period,
+            "startDate": start_date,
+            "endDate": end_date,
+        }
+        if extra_params:
+            params.update(extra_params)
+        query = urlencode(params)
+        return await self.get2(
+            f"service/{service_path}/{device_id}/energy-history?{query}"
+        )
+
 
 class ClientAsync:
     """

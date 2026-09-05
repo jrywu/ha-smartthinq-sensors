@@ -578,6 +578,17 @@ class LGEDevice:
             self._disc_count = 0
             self._state = state
 
+        await self._async_energy_update()
+
+    async def _async_energy_update(self) -> None:
+        """Update the energy meter (rate limited inside the device)."""
+        if not self._device.energy_meter:
+            return
+        try:
+            await self._device.update_energy_meter()
+        except Exception as exc:  # pylint: disable=broad-except
+            _LOGGER.debug("Error updating energy meter for %s: %s", self._name, exc)
+
 
 async def lge_devices_setup(
     hass: HomeAssistant,
