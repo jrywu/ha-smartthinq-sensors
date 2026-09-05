@@ -21,3 +21,4 @@ config/*
 # WideQ test file
 custom_components/smartthinq_sensors/wideq/deviceV1.txt
 custom_components/smartthinq_sensors/wideq/deviceV2.txt
+.DS_Store

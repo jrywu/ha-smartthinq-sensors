@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
+import logging
 
 from ..backports.functools import cached_property
 from ..const import DehumidifierFeatures
@@ -10,6 +11,8 @@ from ..core_async import ClientAsync
 from ..core_exceptions import InvalidRequestError
 from ..device import Device, DeviceStatus
 from ..device_info import DeviceInfo
+
+_LOGGER = logging.getLogger(__name__)
 
 CTRL_BASIC = ["Control", "basicCtrl"]
 STATE_POWER_V1 = "InOutInstantPower"
@@ -77,7 +80,7 @@ class DeHumidifierDevice(Device):
     def __init__(self, client: ClientAsync, device_info: DeviceInfo):
         super().__init__(client, device_info, DeHumidifierStatus(self))
 
-        self._current_power = 0
+        self._current_power = None
         self._current_power_supported = True
 
     @cached_property
@@ -162,15 +165,16 @@ class DeHumidifierDevice(Device):
     async def get_power(self):
         """Get the instant power usage in watts of the whole unit."""
         if not self._current_power_supported:
-            return 0
+            return None
 
         try:
             value = await self._get_config(STATE_POWER_V1)
             return value[STATE_POWER_V1]
-        except (ValueError, InvalidRequestError):
+        except (ValueError, InvalidRequestError) as exc:
             # Device does not support whole unit instant power usage
+            _LOGGER.debug("Error calling get_power methods: %s", exc)
             self._current_power_supported = False
-            return 0
+            return None
 
     async def set(
         self, ctrl_key, command, *, key=None, value=None, data=None, ctrl_path=None
@@ -186,32 +190,34 @@ class DeHumidifierDevice(Device):
         self._status = DeHumidifierStatus(self)
         return self._status
 
-    # async def _get_device_info(self):
-    #    """Call additional method to get device information for API v1.
-    #
-    #    Called by 'device_poll' method using a lower poll rate
-    #    """
-    #    # this command is to get power usage on V1 device
-    #    self._current_power = await self.get_power()
+    async def _get_device_info(self):
+        """
+        Call additional method to get device information for API v1.
+        Called by 'device_poll' method using a lower poll rate.
+        """
+        # this command is to get power usage on V1 device
+        self._current_power = await self.get_power()
 
-    # async def _pre_update_v2(self):
-    #    """Call additional methods before data update for v2 API."""
-    #    # this command is to get power and temp info on V2 device
-    #    keys = self._get_cmd_keys(CMD_ENABLE_EVENT_V2)
-    #    await self.set(keys[0], keys[1], key=keys[2], value="70", ctrl_path="control")
+    async def _pre_update_v2(self):
+        """Call additional methods before data update for v2 API."""
+        # this command is to get power and temp info on V2 device
+        keys = self._get_cmd_keys(CMD_ENABLE_EVENT_V2)
+        await self.set(keys[0], keys[1], key=keys[2], value="70", ctrl_path="control")
 
     async def poll(self) -> DeHumidifierStatus | None:
         """Poll the device's current state."""
 
-        res = await self._device_poll()
-        # res = await self.device_poll(
-        #     thinq1_additional_poll=ADD_FEAT_POLL_INTERVAL,
-        #     thinq2_query_device=True,
-        # )
+        res = await self._device_poll(
+            additional_poll_interval_v1=ADD_FEAT_POLL_INTERVAL,
+            additional_poll_interval_v2=ADD_FEAT_POLL_INTERVAL,
+            thinq2_query_device=True,
+        )
         if not res:
             return None
-        # if self._should_poll:
-        #     res[AC_STATE_POWER_V1] = self._current_power
+
+        # update power for V1 device
+        if self._should_poll and self._current_power is not None:
+            res[STATE_POWER_V1] = self._current_power
 
         self._status = DeHumidifierStatus(self, res)
 
@@ -314,9 +320,18 @@ class DeHumidifierStatus(DeviceStatus):
             return None
         return self._update_feature(DehumidifierFeatures.WATER_TANK_FULL, value)
 
+    @property
+    def energy_current(self):
+        """Return current power usage in watts."""
+        key = self._get_state_key(STATE_POWER)
+        if (value := self.to_int_or_none(self._data.get(key))) is None:
+            return None
+        return self._update_feature(DehumidifierFeatures.ENERGY_CURRENT, value, False)
+
     def _update_features(self):
         _ = [
             self.current_humidity,
             self.target_humidity,
             self.water_tank_full,
+            self.energy_current,
         ]

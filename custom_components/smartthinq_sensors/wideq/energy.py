@@ -63,8 +63,15 @@ _DATE_FMT = "%Y-%m-%d"
 
 
 def energy_meter_supported(device_info: DeviceInfo) -> bool:
-    """Return True if an energy meter can be created for the device."""
-    if device_info.platform_type != PlatformType.THINQ2:
+    """
+    Return True if an energy meter can be created for the device.
+
+    The energy-history service is a ThinQ2 API, but it is probed for ThinQ1
+    devices too: the account gateway always exposes a thinq2Uri and the app
+    shows energy monitoring for some ThinQ1 devices. The meter disables
+    itself if no service path answers.
+    """
+    if device_info.platform_type == PlatformType.UNKNOWN:
         return False
     return device_info.type in ENERGY_SERVICE_PATHS
 
