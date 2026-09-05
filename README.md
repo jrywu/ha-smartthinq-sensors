@@ -122,10 +122,12 @@ restored on restart so energy is never counted twice. The entity attributes
 expose `today_wh`, `last_delta_wh`, `last_update`, `energy_service` (the
 service path that answered) and `last_error` for diagnostics.
 
-The service path is confirmed for laundry devices (`laundry`); for
-dehumidifiers a small list of candidate paths is probed and the first one that
-answers is used. If no path answers after ~30 minutes the meter is disabled
-for that device (enable debug logging to see the responses).
+ThinQ2 devices use `service/{laundry|aircon}/{id}/energy-history`; ThinQ1
+air-family devices (AC, dehumidifier) use `aircon/inquiryPowerData` on the
+V1 API (both as implemented by the ThinQ app / ioBroker.lg-thinq). For
+ThinQ2 dehumidifiers a small list of candidate paths is probed and the first
+one that answers is used. If nothing answers after ~30 minutes the meter is
+disabled for that device (enable debug logging to see the responses).
 
 #### Attributes `sensor.my_washer`
 

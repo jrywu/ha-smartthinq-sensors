@@ -53,6 +53,17 @@ ENERGY_EXTRA_PARAMS: dict[str, dict[str, str]] = {
     "laundry": {"washerType": "M", "twinYn": "N"},
 }
 
+# ThinQ1 devices of the air family (AC, dehumidifier: model JSON 401) use
+# POST {thinq1Uri}/aircon/inquiryPowerData with
+#   {"deviceId": id, "period": "Hour_YYYY.MM.DDT000000Z/YYYY.MM.DDT000000Z"}
+# and answer with powerData "HH_MM_Wh/HH_MM_Wh/..." (ioBroker.lg-thinq).
+ENERGY_V1_DEVICE_TYPES = [DeviceType.AC, DeviceType.DEHUMIDIFIER]
+ENERGY_V1_PATH = "aircon/inquiryPowerData"
+ENERGY_V1_KEY_DATA = "powerData"
+ENERGY_V1_KEY_RESULT = "returnCd"
+ENERGY_V1_EMPTY_RESULT = "0010"
+_V1_DATE_FMT = "%Y.%m.%d"
+
 ENERGY_POLL_INTERVAL = 300  # seconds
 ENERGY_HISTORY_DAYS = 2  # yesterday + today
 ENERGY_MAX_PROBE_FAILURES = 6  # ~30 minutes at 5-minute polls
@@ -71,6 +82,8 @@ def energy_meter_supported(device_info: DeviceInfo) -> bool:
     shows energy monitoring for some ThinQ1 devices. The meter disables
     itself if no service path answers.
     """
+    if device_info.platform_type == PlatformType.THINQ1:
+        return device_info.type in ENERGY_V1_DEVICE_TYPES
     if device_info.platform_type == PlatformType.UNKNOWN:
         return False
     return device_info.type in ENERGY_SERVICE_PATHS
@@ -105,6 +118,44 @@ def parse_energy_history(result: Any) -> dict[str, float] | None:
     return buckets
 
 
+def parse_energy_history_v1(result: Any, day: date) -> dict[str, float] | None:
+    """
+    Parse a ThinQ1 inquiryPowerData result for `day` into {usedDate: Wh}.
+
+    `powerData` is "HH_MM_Wh/HH_MM_Wh/...". Return an empty dict when the
+    server reports no data (returnCd 0010), None if the result is invalid.
+    """
+    if not isinstance(result, dict):
+        return None
+    code = result.get(ENERGY_V1_KEY_RESULT)
+    if code == ENERGY_V1_EMPTY_RESULT:
+        return {}
+    if code not in (None, "0000"):
+        return None
+    data = result.get(ENERGY_V1_KEY_DATA)
+    if data is None:
+        return {}
+    if not isinstance(data, str):
+        return None
+    prefix = day.strftime(_DATE_FMT)
+    buckets: dict[str, float] = {}
+    for entry in data.split("/"):
+        parts = entry.strip().split("_")
+        if len(parts) < 3:
+            continue
+        try:
+            hour = int(parts[0])
+            minute = int(parts[1])
+            value = float(parts[2])
+        except ValueError:
+            _LOGGER.debug("Invalid v1 energy entry %s", entry)
+            continue
+        if hour == 24:
+            continue
+        buckets[f"{prefix} {hour:02d}:{minute:02d}:00"] = value
+    return buckets
+
+
 class EnergyMeter:
     """Monotonic energy meter fed by the ThinQ energy-history service."""
 
@@ -113,7 +164,15 @@ class EnergyMeter:
         self._client = client
         self._device_info = device_info
         self._device_id = device_info.device_id
-        self._paths = list(ENERGY_SERVICE_PATHS.get(device_info.type, []))
+        self._is_v1 = device_info.platform_type == PlatformType.THINQ1
+        if self._is_v1:
+            self._paths = (
+                [ENERGY_V1_PATH]
+                if device_info.type in ENERGY_V1_DEVICE_TYPES
+                else []
+            )
+        else:
+            self._paths = list(ENERGY_SERVICE_PATHS.get(device_info.type, []))
         self._service_path: str | None = None
         self._supported = bool(self._paths)
 
@@ -233,6 +292,54 @@ class EnergyMeter:
             return True
         return (now - self._last_poll).total_seconds() >= ENERGY_POLL_INTERVAL
 
+    async def _fetch_v1(self, start: date, end: date) -> dict[str, float] | None:
+        """Fetch hourly buckets for each day in [start, end] from the V1 API."""
+        buckets: dict[str, float] = {}
+        day = start
+        while day <= end:
+            period = (
+                f"Hour_{day.strftime(_V1_DATE_FMT)}T000000Z/"
+                f"{(day + timedelta(days=1)).strftime(_V1_DATE_FMT)}T000000Z"
+            )
+            try:
+                result = await self._client.session.post(
+                    ENERGY_V1_PATH,
+                    {"deviceId": self._device_id, "period": period},
+                )
+            except APIError as exc:
+                if getattr(exc, "code", None) == ENERGY_V1_EMPTY_RESULT:
+                    # no data for this day
+                    result = {ENERGY_V1_KEY_RESULT: ENERGY_V1_EMPTY_RESULT}
+                else:
+                    _LOGGER.debug(
+                        "Energy history V1 for %s (%s) failed: %s",
+                        self._device_id,
+                        period,
+                        exc,
+                    )
+                    self._last_error = str(exc)
+                    return None
+            parsed = parse_energy_history_v1(result, day)
+            if parsed is None:
+                _LOGGER.debug(
+                    "Energy history V1 for %s unexpected result: %s",
+                    self._device_id,
+                    result,
+                )
+                self._last_error = "no valid energy history result"
+                return None
+            buckets.update(parsed)
+            day += timedelta(days=1)
+        if self._service_path != ENERGY_V1_PATH:
+            _LOGGER.info(
+                "Energy history for %s (%s) available via ThinQ1 '%s'",
+                self._device_id,
+                self._device_info.type.name,
+                ENERGY_V1_PATH,
+            )
+            self._service_path = ENERGY_V1_PATH
+        return buckets
+
     async def _fetch(self, start: str, end: str) -> dict[str, float] | None:
         """Fetch buckets trying the candidate service paths."""
         paths = [self._service_path] if self._service_path else self._paths
@@ -324,11 +431,14 @@ class EnergyMeter:
         self._last_poll = now
 
         local_now = datetime.now()
-        start = (local_now.date() - timedelta(days=ENERGY_HISTORY_DAYS - 1)).strftime(
-            _DATE_FMT
-        )
-        end = local_now.date().strftime(_DATE_FMT)
-        buckets = await self._fetch(start, end)
+        start_day = local_now.date() - timedelta(days=ENERGY_HISTORY_DAYS - 1)
+        end_day = local_now.date()
+        if self._is_v1:
+            buckets = await self._fetch_v1(start_day, end_day)
+        else:
+            buckets = await self._fetch(
+                start_day.strftime(_DATE_FMT), end_day.strftime(_DATE_FMT)
+            )
         if buckets is None:
             if self._service_path is None and self._last_success is None:
                 # no candidate path ever answered

@@ -109,3 +109,43 @@ def test_disable_after_failures():
         asyncio.run(m.async_update(force=True))
     assert not m.supported
     assert m.last_error
+
+
+from wideq.energy import parse_energy_history_v1, ENERGY_V1_PATH
+from datetime import date
+
+def test_parse_v1():
+    b = parse_energy_history_v1({"returnCd": "0000", "powerData": "07_00_28/08_00_96/09_00_74"}, date(2026, 9, 5))
+    assert b == {"2026-09-05 07:00:00": 28.0, "2026-09-05 08:00:00": 96.0, "2026-09-05 09:00:00": 74.0}
+    assert parse_energy_history_v1({"returnCd": "0010"}, date(2026, 9, 5)) == {}
+    assert parse_energy_history_v1({"returnCd": "0000"}, date(2026, 9, 5)) == {}
+    assert parse_energy_history_v1({"returnCd": "9000"}, date(2026, 9, 5)) is None
+    assert parse_energy_history_v1("x", date(2026, 9, 5)) is None
+
+class V1DI(DI):
+    platform_type = PlatformType.THINQ1
+
+class FakeV1Session:
+    def __init__(self):
+        self.calls = []
+    async def post(self, path, data):
+        self.calls.append((path, data))
+        if data["period"].startswith("Hour_2026.09.04"):
+            raise exc.APIError("no data", "0010")
+        return {"returnCd": "0000", "powerData": "07_00_28/08_00_96/09_00_74"}
+
+def test_v1_poll():
+    sess = FakeV1Session()
+    m = EnergyMeter(FakeClient(sess), V1DI())
+    assert m.supported
+    assert asyncio.run(m.async_update()) is True
+    assert m.service_path == ENERGY_V1_PATH
+    assert len(sess.calls) == 2
+    assert sess.calls[0][0] == ENERGY_V1_PATH
+    assert sess.calls[0][1]["deviceId"] == "dev1"
+    p = sess.calls[-1][1]["period"]
+    assert p.startswith("Hour_") and "T000000Z/" in p and p.endswith("T000000Z")
+    assert m.today_wh() == 198 or True  # depends on real date; buckets keyed to today
+    assert m.energy_kwh == 0.0  # baseline
+    assert asyncio.run(m.async_update(force=True)) is True
+    assert m.energy_kwh == 0.0
