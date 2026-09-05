@@ -187,6 +187,7 @@ class EnergyMeter:
         self._last_error: str | None = None
         self._raw: dict[str, float] = {}
         self._probe_failures = 0
+        self._error_logged = False
 
     # ---- state exposed to the integration ----
 
@@ -440,6 +441,14 @@ class EnergyMeter:
                 start_day.strftime(_DATE_FMT), end_day.strftime(_DATE_FMT)
             )
         if buckets is None:
+            if not self._error_logged:
+                self._error_logged = True
+                _LOGGER.info(
+                    "Energy history for %s (%s) not available yet: %s",
+                    self._device_id,
+                    self._device_info.type.name,
+                    self._last_error,
+                )
             if self._service_path is None and self._last_success is None:
                 # no candidate path ever answered
                 self._probe_failures += 1

@@ -527,6 +527,15 @@ class LGEDevice:
         return self._state
 
     async def _async_state_update(self):
+        """Update device state and energy meter."""
+        try:
+            await self._async_status_update()
+        finally:
+            # energy history is server side data: update it even when the
+            # device is offline / unreachable
+            await self._async_energy_update()
+
+    async def _async_status_update(self):
         """Update device state."""
         _LOGGER.debug("Updating ThinQ device %s", self._name)
         if self._disc_count < MAX_DISC_COUNT:
@@ -578,16 +587,16 @@ class LGEDevice:
             self._disc_count = 0
             self._state = state
 
-        await self._async_energy_update()
-
     async def _async_energy_update(self) -> None:
         """Update the energy meter (rate limited inside the device)."""
         if not self._device.energy_meter:
             return
         try:
             await self._device.update_energy_meter()
+        except InvalidCredentialError:
+            return
         except Exception as exc:  # pylint: disable=broad-except
-            _LOGGER.debug("Error updating energy meter for %s: %s", self._name, exc)
+            _LOGGER.warning("Error updating energy meter for %s: %s", self._name, exc)
 
 
 async def lge_devices_setup(

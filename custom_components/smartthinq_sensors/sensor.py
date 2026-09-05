@@ -827,8 +827,8 @@ class LGEEnergyMeterSensor(CoordinatorEntity, RestoreSensor):
 
     @property
     def available(self) -> bool:
-        """Return True if entity is available."""
-        return self._api.available and self._meter is not None
+        """Return True if entity is available (server side data)."""
+        return self._meter is not None
 
     @property
     def native_value(self) -> float | None:
