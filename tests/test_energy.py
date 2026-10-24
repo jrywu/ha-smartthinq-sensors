@@ -34,6 +34,60 @@ def test_parse():
     assert parse_energy_history({"foo": 1}) is None
     assert parse_energy_history(None) is None
 
+def test_washer_power_fallback_prefers_reported_energy():
+    result = {"item": [
+        {"usedDate": "2026-10-24 18:00:00", "periodicEnergyData": 0, "power": "4"},
+        {"usedDate": "2026-10-24 19:00:00", "periodicEnergyData": 2, "power": 4},
+        {"usedDate": "2026-10-24 20:00:00", "power": 3},
+        {"usedDate": "2026-10-24 21:00:00", "periodicEnergyData": 0, "power": "bad"},
+    ]}
+    assert parse_energy_history(result, power_fallback=True) == {
+        "2026-10-24 18:00:00": 4,
+        "2026-10-24 19:00:00": 2,
+        "2026-10-24 20:00:00": 3,
+        "2026-10-24 21:00:00": 0,
+    }
+    assert parse_energy_history(result)["2026-10-24 18:00:00"] == 0
+
+def test_washer_fallback_restore_and_later_energy_do_not_double_count():
+    class WDI(DI): type = DeviceType.WASHER
+    key = "2026-10-24 18:00:00"
+    sess = FakeSession("laundry", [{"item": [{"usedDate": key, "periodicEnergyData": 0, "power": 4}]}])
+    m = EnergyMeter(FakeClient(sess), WDI())
+    m.restore(0.1, {key: 0})
+    now = datetime(2026, 10, 24, 20)
+    b = asyncio.run(m._fetch("2026-10-24", "2026-10-24"))
+    assert m.energy_estimated is True
+    assert m.power_fallback_buckets == {key: 4}
+    assert m.apply_buckets(b, now) == 4
+    restored = EnergyMeter(FakeClient(sess), WDI())
+    restored.restore(m.energy_kwh, m.applied)
+    assert restored.apply_buckets(b, now) == 0
+    sess.results = [{"item": [{"usedDate": key, "periodicEnergyData": 4, "power": 4}]}]
+    b = asyncio.run(restored._fetch("2026-10-24", "2026-10-24"))
+    assert restored.power_fallback_buckets == {}
+    assert restored.apply_buckets(b, now) == 0
+    sess.results = [{"item": [{"usedDate": key, "periodicEnergyData": 6, "power": 4}]}]
+    b = asyncio.run(restored._fetch("2026-10-24", "2026-10-24"))
+    assert restored.apply_buckets(b, now) == 2
+    assert restored.energy_kwh == 0.106
+
+def test_power_fallback_is_washer_only():
+    key = "2026-10-24 18:00:00"
+    result = {"item": [{"usedDate": key, "periodicEnergyData": 0, "power": 906}]}
+    for device_type in (DeviceType.DRYER, DeviceType.DEHUMIDIFIER):
+        class OtherDI(DI): type = device_type
+        path = "laundry" if device_type == DeviceType.DRYER else "aircon"
+        m = EnergyMeter(FakeClient(FakeSession(path, [result])), OtherDI())
+        assert asyncio.run(m._fetch("2026-10-24", "2026-10-24")) == {key: 0}
+        assert m.energy_estimated is False
+        assert m.power_fallback_buckets == {}
+
+def test_invalid_power_fallback_does_not_poison_meter():
+    for power in (None, "invalid", -4, "NaN", "Infinity"):
+        result = {"item": [{"usedDate": "2026-10-24 18:00:00", "periodicEnergyData": 0, "power": power}]}
+        assert parse_energy_history(result, power_fallback=True) == {"2026-10-24 18:00:00": 0}
+
 def test_baseline_then_delta():
     m = EnergyMeter(FakeClient(None), DI())
     assert m.energy_kwh is None
@@ -101,6 +155,52 @@ def test_laundry_extra_params():
     asyncio.run(m.async_update())
     assert sess.calls[0][1]["extra_params"] == {"washerType": "M", "twinYn": "N"}
 
+class DailyLaundrySession:
+    def __init__(self, failed_days=()):
+        self.failed_days = failed_days
+        self.calls = []
+        self.today_wh = 100
+
+    async def get_energy_history(self, device_id, path, **kw):
+        start = kw["start_date"]
+        self.calls.append((start, kw["end_date"]))
+        if start in self.failed_days:
+            raise exc.APIError("day unavailable", "9999")
+        # LG's hourly endpoint returns only the start date, even for a range.
+        value = self.today_wh if start == "2026-10-24" else 50
+        return {"item": [{"usedDate": start + " 18:00:00", "periodicEnergyData": value}]}
+
+def test_laundry_fetches_each_day_and_counts_only_growth():
+    for device_type in (DeviceType.WASHER, DeviceType.DRYER):
+        class LaundryDI(DI): type = device_type
+        sess = DailyLaundrySession()
+        m = EnergyMeter(FakeClient(sess), LaundryDI())
+        buckets = asyncio.run(m._fetch("2026-10-23", "2026-10-24"))
+        assert buckets == {"2026-10-23 18:00:00": 50, "2026-10-24 18:00:00": 100}
+        assert sess.calls == [("2026-10-23", "2026-10-23"), ("2026-10-24", "2026-10-24")]
+        now = datetime(2026, 10, 24, 20)
+        m.apply_buckets(buckets, now)
+        sess.today_wh = 150
+        buckets = asyncio.run(m._fetch("2026-10-23", "2026-10-24"))
+        assert m.apply_buckets(buckets, now) == 50
+        assert m.apply_buckets(buckets, now) == 0
+
+def test_laundry_partial_day_failure_keeps_other_day():
+    class WDI(DI): type = DeviceType.WASHER
+    for failed_day in ("2026-10-23", "2026-10-24"):
+        sess = DailyLaundrySession({failed_day})
+        m = EnergyMeter(FakeClient(sess), WDI())
+        buckets = asyncio.run(m._fetch("2026-10-23", "2026-10-24"))
+        assert len(sess.calls) == 2
+        assert len(buckets) == 1
+        assert all(not key.startswith(failed_day) for key in buckets)
+
+def test_laundry_all_days_fail():
+    class WDI(DI): type = DeviceType.WASHER
+    sess = DailyLaundrySession({"2026-10-23", "2026-10-24"})
+    m = EnergyMeter(FakeClient(sess), WDI())
+    assert asyncio.run(m._fetch("2026-10-23", "2026-10-24")) is None
+
 def test_disable_after_failures():
     sess = FakeSession("nope", [SAMPLE])
     m = EnergyMeter(FakeClient(sess), DI())
@@ -124,6 +224,24 @@ def test_parse_v1():
 
 class V1DI(DI):
     platform_type = PlatformType.THINQ1
+
+def test_v1_operation_time_is_not_bucket_minute():
+    day = date(2026, 10, 24)
+    first = parse_energy_history_v1({"powerData": "20_96_3"}, day)
+    assert first == {"2026-10-24 20:00:00": 3.0}
+    m = EnergyMeter(FakeClient(None), V1DI())
+    m.apply_buckets(first, datetime(2026, 10, 24, 20, 30))
+    updated = parse_energy_history_v1({"powerData": "20_120_3"}, day)
+    assert m.apply_buckets(updated, datetime(2026, 10, 24, 20, 35)) == 0
+    updated = parse_energy_history_v1({"powerData": "20_180_5"}, day)
+    assert m.apply_buckets(updated, datetime(2026, 10, 24, 20, 40)) == 2
+
+def test_v1_restore_old_operation_time_bucket_keys():
+    m = EnergyMeter(FakeClient(None), V1DI())
+    m.restore(1.0, {"2026-10-24 20:96:00": 3, "2026-10-24 20:120:00": 4})
+    buckets = parse_energy_history_v1({"powerData": "20_180_5"}, date(2026, 10, 24))
+    assert m.apply_buckets(buckets, datetime(2026, 10, 24, 20, 40)) == 1
+    assert m.energy_kwh == 1.001
 
 class FakeV1Session:
     def __init__(self):

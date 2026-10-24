@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 import logging
+from math import isfinite
 from typing import TYPE_CHECKING, Any
 
 from .core_exceptions import APIError, InvalidRequestError, NotConnectedError
@@ -56,7 +57,7 @@ ENERGY_EXTRA_PARAMS: dict[str, dict[str, str]] = {
 # ThinQ1 devices of the air family (AC, dehumidifier: model JSON 401) use
 # POST {thinq1Uri}/aircon/inquiryPowerData with
 #   {"deviceId": id, "period": "Hour_YYYYMMDDT000000Z/YYYYMMDDT000000Z"}
-# and answer with powerData "HH_MM_Wh/HH_MM_Wh/..." (ioBroker.lg-thinq).
+# and answer with powerData "HH_operationTime_Wh/..." (LG app GJM module).
 # A wrong period format is answered with 9004 "DB processing failed".
 ENERGY_V1_DEVICE_TYPES = [DeviceType.AC, DeviceType.DEHUMIDIFIER]
 ENERGY_V1_PATH = "aircon/inquiryPowerData"
@@ -90,10 +91,13 @@ def energy_meter_supported(device_info: DeviceInfo) -> bool:
     return device_info.type in ENERGY_SERVICE_PATHS
 
 
-def parse_energy_history(result: Any) -> dict[str, float] | None:
+def parse_energy_history(
+    result: Any, *, power_fallback: bool = False
+) -> dict[str, float] | None:
     """
     Parse an energy-history result into {usedDate: Wh}.
 
+    Optionally assume washer `power` is Wh when periodic energy is unavailable.
     Return None if the result is not in the expected shape.
     """
     if not isinstance(result, dict):
@@ -109,13 +113,24 @@ def parse_energy_history(result: Any) -> dict[str, float] | None:
             continue
         used_date = item.get(ENERGY_KEY_DATE)
         value = item.get(ENERGY_KEY_VALUE)
-        if not used_date or value is None:
+        if not used_date:
             continue
         try:
-            buckets[str(used_date)] = float(value)
+            value = float(value)
         except (TypeError, ValueError):
-            _LOGGER.debug("Invalid energy value %s for %s", value, used_date)
+            value = None
+        if value is not None and (not isfinite(value) or value < 0):
+            value = None
+        if power_fallback and not value:
+            try:
+                power = float(item.get("power"))
+                if isfinite(power) and power > 0:
+                    value = power
+            except (TypeError, ValueError):
+                pass
+        if value is None:
             continue
+        buckets[str(used_date)] = value
     return buckets
 
 
@@ -123,7 +138,7 @@ def parse_energy_history_v1(result: Any, day: date) -> dict[str, float] | None:
     """
     Parse a ThinQ1 inquiryPowerData result for `day` into {usedDate: Wh}.
 
-    `powerData` is "HH_MM_Wh/HH_MM_Wh/...". Return an empty dict when the
+    `powerData` is "HH_operationTime_Wh/...". Return an empty dict when the
     server reports no data (returnCd 0010), None if the result is invalid.
     """
     if not isinstance(result, dict):
@@ -146,14 +161,13 @@ def parse_energy_history_v1(result: Any, day: date) -> dict[str, float] | None:
             continue
         try:
             hour = int(parts[0])
-            minute = int(parts[1])
             value = float(parts[2])
         except ValueError:
             _LOGGER.debug("Invalid v1 energy entry %s", entry)
             continue
-        if hour == 24:
+        if not 0 <= hour < 24:
             continue
-        buckets[f"{prefix} {hour:02d}:{minute:02d}:00"] = value
+        buckets[f"{prefix} {hour:02d}:00:00"] = value
     return buckets
 
 
@@ -166,6 +180,11 @@ class EnergyMeter:
         self._device_info = device_info
         self._device_id = device_info.device_id
         self._is_v1 = device_info.platform_type == PlatformType.THINQ1
+        # shortcut: power units are unverified on legacy washers; validate against usage history.
+        self._power_fallback = (
+            device_info.type == DeviceType.WASHER and not self._is_v1
+        )
+        self._power_fallback_buckets: dict[str, float] = {}
         if self._is_v1:
             self._paths = (
                 [ENERGY_V1_PATH]
@@ -230,6 +249,16 @@ class EnergyMeter:
         return dict(self._raw)
 
     @property
+    def energy_estimated(self) -> bool:
+        """Return whether this meter permits unverified washer power estimates."""
+        return self._power_fallback
+
+    @property
+    def power_fallback_buckets(self) -> dict[str, float]:
+        """Return the latest fetched buckets using power, assumed to be Wh."""
+        return dict(self._power_fallback_buckets)
+
+    @property
     def applied(self) -> dict[str, float]:
         """Return the Wh already applied per bucket (for persistence)."""
         return dict(self._applied)
@@ -267,7 +296,15 @@ class EnergyMeter:
         restored: dict[str, float] = {}
         for key, val in (applied or {}).items():
             try:
-                restored[str(key)] = float(val)
+                bucket_key = str(key)
+                if self._is_v1:
+                    # Older versions put operation time in the minute field.
+                    bucket_key = f"{bucket_key[:13]}:00:00"
+                    restored[bucket_key] = max(
+                        restored.get(bucket_key, 0.0), float(val)
+                    )
+                else:
+                    restored[bucket_key] = float(val)
             except (TypeError, ValueError):
                 continue
         if service_path and service_path in self._paths:
@@ -351,6 +388,24 @@ class EnergyMeter:
         return buckets
 
     async def _fetch(self, start: str, end: str) -> dict[str, float] | None:
+        """Fetch laundry hourly data one day at a time, retaining partial results."""
+        self._power_fallback_buckets = {}
+        if "laundry" not in self._paths:
+            return await self._fetch_range(start, end)
+        day = date.fromisoformat(start)
+        end_day = date.fromisoformat(end)
+        buckets: dict[str, float] = {}
+        succeeded = False
+        while day <= end_day:
+            day_str = day.strftime(_DATE_FMT)
+            result = await self._fetch_range(day_str, day_str)
+            if result is not None:
+                buckets.update(result)
+                succeeded = True
+            day += timedelta(days=1)
+        return buckets if succeeded else None
+
+    async def _fetch_range(self, start: str, end: str) -> dict[str, float] | None:
         """Fetch buckets trying the candidate service paths."""
         paths = [self._service_path] if self._service_path else self._paths
         last_exc: Exception | None = None
@@ -373,7 +428,12 @@ class EnergyMeter:
                 )
                 last_exc = exc
                 continue
-            buckets = parse_energy_history(result)
+            reported = parse_energy_history(result)
+            buckets = (
+                parse_energy_history(result, power_fallback=True)
+                if self._power_fallback
+                else reported
+            )
             if buckets is None:
                 _LOGGER.debug(
                     "Energy history for %s via '%s' unexpected result: %s",
@@ -382,6 +442,13 @@ class EnergyMeter:
                     result,
                 )
                 continue
+            if self._power_fallback:
+                self._power_fallback_buckets.update(
+                    {
+                        key: value for key, value in buckets.items()
+                        if value != (reported or {}).get(key)
+                    }
+                )
             if self._service_path != path:
                 _LOGGER.info(
                     "Energy history for %s (%s) available via service '%s'",

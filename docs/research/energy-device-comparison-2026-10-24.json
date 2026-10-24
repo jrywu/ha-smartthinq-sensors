@@ -1,0 +1,338 @@
+[
+  {
+    "query_time": "2026-10-24T20:51:41.823150+08:00"
+  },
+  {
+    "device_type": "DEHUMIDIFIER",
+    "platform": "thinq1"
+  },
+  {
+    "device_type": "DEHUMIDIFIER",
+    "platform": "thinq1",
+    "query": "single_day",
+    "date": "2026-10-23",
+    "service": "aircon/inquiryPowerData",
+    "bucket_count": 0,
+    "total_wh": 0,
+    "nonzero_buckets": {},
+    "error": null
+  },
+  {
+    "device_type": "DEHUMIDIFIER",
+    "platform": "thinq1",
+    "query": "single_day",
+    "date": "2026-10-24",
+    "service": "aircon/inquiryPowerData",
+    "bucket_count": 3,
+    "total_wh": 10.0,
+    "nonzero_buckets": {
+      "2026-10-24 18:00:00": 1.0,
+      "2026-10-24 19:00:00": 6.0,
+      "2026-10-24 20:96:00": 3.0
+    },
+    "error": null
+  },
+  {
+    "device_type": "DEHUMIDIFIER",
+    "platform": "thinq1",
+    "query": "single_day",
+    "date": "2026-10-22",
+    "service": "aircon/inquiryPowerData",
+    "bucket_count": 13,
+    "total_wh": 55.0,
+    "nonzero_buckets": {
+      "2026-10-22 11:00:00": 4.0,
+      "2026-10-22 12:00:00": 4.0,
+      "2026-10-22 13:00:00": 5.0,
+      "2026-10-22 14:00:00": 5.0,
+      "2026-10-22 15:00:00": 6.0,
+      "2026-10-22 16:00:00": 3.0,
+      "2026-10-22 17:00:00": 4.0,
+      "2026-10-22 18:00:00": 6.0,
+      "2026-10-22 19:00:00": 5.0,
+      "2026-10-22 20:00:00": 2.0,
+      "2026-10-22 21:00:00": 4.0,
+      "2026-10-22 22:00:00": 5.0,
+      "2026-10-22 23:555:00": 2.0
+    },
+    "error": null
+  },
+  {
+    "device_type": "DEHUMIDIFIER",
+    "platform": "thinq1",
+    "query": "single_day",
+    "date": "2026-10-19",
+    "service": "aircon/inquiryPowerData",
+    "bucket_count": 9,
+    "total_wh": 38.0,
+    "nonzero_buckets": {
+      "2026-10-19 12:00:00": 4.0,
+      "2026-10-19 13:00:00": 4.0,
+      "2026-10-19 14:00:00": 5.0,
+      "2026-10-19 15:00:00": 5.0,
+      "2026-10-19 16:00:00": 5.0,
+      "2026-10-19 17:00:00": 5.0,
+      "2026-10-19 18:00:00": 7.0,
+      "2026-10-19 19:00:00": 1.0,
+      "2026-10-19 20:360:00": 2.0
+    },
+    "error": null
+  },
+  {
+    "device_type": "WASHER",
+    "platform": "thinq2"
+  },
+  {
+    "device_type": "WASHER",
+    "platform": "thinq2",
+    "query": "combined",
+    "start": "2026-10-23",
+    "end": "2026-10-24",
+    "bucket_count": 24,
+    "dates": [
+      "2026-10-23"
+    ],
+    "totals": {
+      "periodicEnergyData": 0.0,
+      "power": 0.0,
+      "powerWh": 0.0,
+      "count": 0.0
+    },
+    "nonzero_buckets": []
+  },
+  {
+    "device_type": "WASHER",
+    "platform": "thinq2",
+    "query": "yesterday",
+    "start": "2026-10-23",
+    "end": "2026-10-23",
+    "bucket_count": 24,
+    "dates": [
+      "2026-10-23"
+    ],
+    "totals": {
+      "periodicEnergyData": 0.0,
+      "power": 0.0,
+      "powerWh": 0.0,
+      "count": 0.0
+    },
+    "nonzero_buckets": []
+  },
+  {
+    "device_type": "WASHER",
+    "platform": "thinq2",
+    "query": "today",
+    "start": "2026-10-24",
+    "end": "2026-10-24",
+    "bucket_count": 24,
+    "dates": [
+      "2026-10-24"
+    ],
+    "totals": {
+      "periodicEnergyData": 0.0,
+      "power": 4.0,
+      "powerWh": 0.0,
+      "count": 1.0
+    },
+    "nonzero_buckets": [
+      {
+        "usedDate": "2026-10-24 18:00:00",
+        "periodicEnergyData": 0,
+        "power": 4,
+        "powerWh": 0,
+        "count": 1
+      }
+    ]
+  },
+  {
+    "device_type": "WASHER",
+    "platform": "thinq2",
+    "query": "Oct22",
+    "start": "2026-10-22",
+    "end": "2026-10-22",
+    "bucket_count": 24,
+    "dates": [
+      "2026-10-22"
+    ],
+    "totals": {
+      "periodicEnergyData": 0.0,
+      "power": 4.0,
+      "powerWh": 0.0,
+      "count": 1.0
+    },
+    "nonzero_buckets": [
+      {
+        "usedDate": "2026-10-22 06:00:00",
+        "periodicEnergyData": 0,
+        "power": 4,
+        "powerWh": 0,
+        "count": 1
+      }
+    ]
+  },
+  {
+    "device_type": "WASHER",
+    "platform": "thinq2",
+    "query": "Oct19",
+    "start": "2026-10-19",
+    "end": "2026-10-19",
+    "bucket_count": 24,
+    "dates": [
+      "2026-10-19"
+    ],
+    "totals": {
+      "periodicEnergyData": 4.0,
+      "power": 4.0,
+      "powerWh": 0.0,
+      "count": 1.0
+    },
+    "nonzero_buckets": [
+      {
+        "usedDate": "2026-10-19 11:00:00",
+        "periodicEnergyData": 4,
+        "power": 4,
+        "powerWh": 0,
+        "count": 1
+      }
+    ]
+  },
+  {
+    "device_type": "DRYER",
+    "platform": "thinq2"
+  },
+  {
+    "device_type": "DRYER",
+    "platform": "thinq2",
+    "query": "combined",
+    "start": "2026-10-23",
+    "end": "2026-10-24",
+    "bucket_count": 24,
+    "dates": [
+      "2026-10-23"
+    ],
+    "totals": {
+      "periodicEnergyData": 0.0,
+      "power": 0.0,
+      "powerWh": 0.0,
+      "count": 0.0
+    },
+    "nonzero_buckets": []
+  },
+  {
+    "device_type": "DRYER",
+    "platform": "thinq2",
+    "query": "yesterday",
+    "start": "2026-10-23",
+    "end": "2026-10-23",
+    "bucket_count": 24,
+    "dates": [
+      "2026-10-23"
+    ],
+    "totals": {
+      "periodicEnergyData": 0.0,
+      "power": 0.0,
+      "powerWh": 0.0,
+      "count": 0.0
+    },
+    "nonzero_buckets": []
+  },
+  {
+    "device_type": "DRYER",
+    "platform": "thinq2",
+    "query": "today",
+    "start": "2026-10-24",
+    "end": "2026-10-24",
+    "bucket_count": 24,
+    "dates": [
+      "2026-10-24"
+    ],
+    "totals": {
+      "periodicEnergyData": 906.0,
+      "power": 906.0,
+      "powerWh": 0.0,
+      "count": 1.0
+    },
+    "nonzero_buckets": [
+      {
+        "usedDate": "2026-10-24 19:00:00",
+        "periodicEnergyData": 608,
+        "power": 0,
+        "powerWh": 0,
+        "count": 0
+      },
+      {
+        "usedDate": "2026-10-24 20:00:00",
+        "periodicEnergyData": 298,
+        "power": 906,
+        "powerWh": 0,
+        "count": 1
+      }
+    ]
+  },
+  {
+    "device_type": "DRYER",
+    "platform": "thinq2",
+    "query": "Oct22",
+    "start": "2026-10-22",
+    "end": "2026-10-22",
+    "bucket_count": 24,
+    "dates": [
+      "2026-10-22"
+    ],
+    "totals": {
+      "periodicEnergyData": 1086.0,
+      "power": 1086.0,
+      "powerWh": 0.0,
+      "count": 1.0
+    },
+    "nonzero_buckets": [
+      {
+        "usedDate": "2026-10-22 11:00:00",
+        "periodicEnergyData": 611,
+        "power": 0,
+        "powerWh": 0,
+        "count": 0
+      },
+      {
+        "usedDate": "2026-10-22 12:00:00",
+        "periodicEnergyData": 475,
+        "power": 1086,
+        "powerWh": 0,
+        "count": 1
+      }
+    ]
+  },
+  {
+    "device_type": "DRYER",
+    "platform": "thinq2",
+    "query": "Oct19",
+    "start": "2026-10-19",
+    "end": "2026-10-19",
+    "bucket_count": 24,
+    "dates": [
+      "2026-10-19"
+    ],
+    "totals": {
+      "periodicEnergyData": 902.0,
+      "power": 902.0,
+      "powerWh": 0.0,
+      "count": 1.0
+    },
+    "nonzero_buckets": [
+      {
+        "usedDate": "2026-10-19 12:00:00",
+        "periodicEnergyData": 619,
+        "power": 0,
+        "powerWh": 0,
+        "count": 0
+      },
+      {
+        "usedDate": "2026-10-19 13:00:00",
+        "periodicEnergyData": 283,
+        "power": 902,
+        "powerWh": 0,
+        "count": 1
+      }
+    ]
+  }
+]

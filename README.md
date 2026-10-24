@@ -122,6 +122,19 @@ restored on restart so energy is never counted twice. The entity attributes
 expose `today_wh`, `last_delta_wh`, `last_update`, `energy_service` (the
 service path that answered) and `last_error` for diagnostics.
 
+Washers retain a best-effort meter when `periodicEnergyData` is zero or missing:
+the corresponding hourly `power` value is used instead, provisionally assuming
+one raw unit is one Wh. This scale is unverified for legacy washer models and
+may represent relative usage rather than physical energy. `energy_estimated`
+marks washer meters using this policy; `power_fallback_buckets` lists the
+fallback values from the latest fetched window, and
+`power_fallback_assumed_unit` records the assumption. Nonzero periodic energy
+is preferred. Both sources share the same hourly bookkeeping, so later energy
+reports add only any increase over the amount already counted. Compare
+`today_wh`, fallback buckets and completed cycles over several days before
+treating the estimate as calibrated consumption. The existing entity and
+accumulated total are retained.
+
 ThinQ2 devices use `service/{laundry|aircon}/{id}/energy-history`; ThinQ1
 air-family devices (AC, dehumidifier) use `aircon/inquiryPowerData` on the
 V1 API (both as implemented by the ThinQ app / ioBroker.lg-thinq). For

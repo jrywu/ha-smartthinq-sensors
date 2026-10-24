@@ -850,4 +850,7 @@ class LGEEnergyMeterSensor(CoordinatorEntity, RestoreSensor):
             ATTR_ENERGY_LAST_UPDATE: last_update.isoformat() if last_update else None,
             ATTR_ENERGY_LAST_ERROR: meter.last_error,
             ATTR_ENERGY_APPLIED: meter.applied,
+            "energy_estimated": meter.energy_estimated,
+            "power_fallback_buckets": meter.power_fallback_buckets,
+            "power_fallback_assumed_unit": "Wh" if meter.energy_estimated else None,
         }
